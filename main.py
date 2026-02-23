@@ -125,6 +125,10 @@ def proxy_audio_stream(video_id: str):
 
     return StreamingResponse(stream_generator(), media_type="audio/mp4")
 
+@app.get("/health")
+def health_check():
+    return {"status": "OK"}
+
 
 ### 4. PLAYLIST ENDPOINT ###
 @app.get("/playlist")
