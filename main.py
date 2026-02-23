@@ -6,25 +6,25 @@ import requests
 
 app = FastAPI(
     title="YT Music Player API",
-    description="A backend API specifically designed to feed audio streams and metadata to a custom music media player, with IP-block bypasses."
+    description="A backend API designed to feed audio streams and metadata to a custom music media player, with IP-block bypasses."
 )
 
 # Standardized options to bypass YouTube's datacenter blocks
 BASE_YTDL_OPTS = {
     'quiet': True,
     'no_warnings': True,
-    # 1. Force IPv4 to bypass strict IPv6 blocking on datacenters (like Railway)
+    # 1. Force IPv4 to bypass strict IPv6 blocking on datacenters
     'source_address': '0.0.0.0', 
     # 2. Spoof the client as an Android app to bypass web-bot detection
     'extractor_args': {'youtube': {'player_client': ['android']}}
 }
 
-def extract_metadata(url: str, custom_opts: dict):
+def extract_metadata(url_or_query: str, custom_opts: dict):
     # Merge the base bypass options with the specific endpoint options
     opts = {**BASE_YTDL_OPTS, **custom_opts}
     try:
         with yt_dlp.YoutubeDL(opts) as ydl:
-            return ydl.extract_info(url, download=False)
+            return ydl.extract_info(url_or_query, download=False)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -40,19 +40,24 @@ def search_yt_music(
 ):
     opts = {
         'extract_flat': True, 
-        'default_search': 'ytsearch' # Fallback to standard search format
+        # Natively handle the search query instead of formatting a custom URL scheme
+        'default_search': f'ytsearch{limit}' 
     }
     
-    # Prefixing 'ytmsearch' to specifically target YouTube Music
-    search_url = f"ytmsearch{limit}:{query}"
-    info = extract_metadata(search_url, opts)
+    info = extract_metadata(query, opts)
     
     results = []
-    for entry in info.get("entries", []):
+    # yt-dlp returns a list in 'entries', but might return a single dict if limit is 1
+    entries = info.get("entries", []) if "entries" in info else [info]
+    
+    for entry in entries:
+        if not entry:
+            continue
+            
         results.append({
             "id": entry.get("id"),
             "title": entry.get("title"),
-            "artist": entry.get("uploader"),
+            "artist": entry.get("uploader", "Unknown Artist"),
             "duration": entry.get("duration"),
             "thumbnail": entry.get("thumbnails")[-1]["url"] if entry.get("thumbnails") else None,
         })
@@ -73,7 +78,6 @@ def get_audio_stream_data(
     video_url = f"https://www.youtube.com/watch?v={video_id}"
     info = extract_metadata(video_url, opts)
     
-    # Find the best audio format URL
     formats = info.get("formats", [])
     audio_url = None
     for f in formats:
@@ -89,15 +93,15 @@ def get_audio_stream_data(
         "title": info.get("title"),
         "artist": info.get("uploader"),
         "duration": info.get("duration"),
-        "direct_url": audio_url, # Useful for metadata, but triggers 403s if played locally
+        "direct_url": audio_url, # Useful for metadata, but triggers 403s if played locally directly
         "thumbnail": info.get("thumbnail"), 
     }
 
-### 3. PROXY AUDIO STREAM ENDPOINT (THE FIX FOR 403 ERRORS) ###
+### 3. PROXY AUDIO STREAM ENDPOINT ###
 @app.get("/proxy/{video_id}")
 def proxy_audio_stream(video_id: str):
     """
-    Downloads audio from YouTube to the Railway server in chunks, 
+    Downloads audio from YouTube to the Render server in chunks, 
     and instantly streams it to the user. Prevents local IP mismatch.
     """
     opts = {
@@ -124,10 +128,6 @@ def proxy_audio_stream(video_id: str):
                     yield chunk
 
     return StreamingResponse(stream_generator(), media_type="audio/mp4")
-
-@app.get("/health")
-def health_check():
-    return {"status": "OK"}
 
 
 ### 4. PLAYLIST ENDPOINT ###
