@@ -1,0 +1,33 @@
+name: Keep Render Alive
+
+on:
+  schedule:
+    - cron: '*/14 * * * *' # Pings every 14 minutes
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Curl with retry and status check
+        shell: bash
+        run: |
+          echo "🌐 First attempt to /health"
+          # Replace the URL below with your actual Render URL
+          RESPONSE=$(curl -s -w "%{http_code}" -o result.txt https://your-app.onrender.com/health)
+          echo "RESPONSE: $RESPONSE"
+          
+          if [[ "$RESPONSE" == "CURL_FAILED" ]]; then
+            echo "❌ curl failed completely."
+            exit 2
+          fi
+          
+          STATUS="${RESPONSE: -3}"
+          echo "HTTP Status: $STATUS"
+          
+          if [[ "$STATUS" != "200" ]]; then
+            echo "⏱ Waiting 20s and retrying..."
+            sleep 20
+            RESPONSE=$(curl -s -w "%{http_code}" -o result.txt https://your-app.onrender.com/health)
+            echo "RETRY RESPONSE: $RESPONSE"
+          fi
